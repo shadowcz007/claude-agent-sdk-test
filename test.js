@@ -41,6 +41,7 @@ async function runWithCustomSystemPrompt() {
 }
 
 
+import { query } from '@anthropic-ai/claude-agent-sdk';
 
 async function runWithCustomSystemPromptAndCwd() {
     const targetDir = '/Users/shadow/Documents/GitHub/claude-agent-sdk-test/test';
@@ -60,3 +61,5 @@ async function runWithCustomSystemPromptAndCwd() {
         }
     }
 }
+
+runWithCustomSystemPromptAndCwd()
