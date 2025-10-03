@@ -65,7 +65,7 @@ const mcpServer = createSdkMcpServer({
     tools: [jinaReader]
 });
 
-async function createNewsBriefing(urls, debugMode = false) {
+async function createNewsBriefing(urls) {
     const targetDir = process.env.TARGET_DIR || '/Users/shadow/Documents/GitHub/claude-agent-sdk-test/test';
     const env = {
         ...process.env,
@@ -332,9 +332,7 @@ async function main() {
     const args = process.argv.slice(2);
     const inputUrls = args.length > 0 ? args : urls;
 
-    // 设置调试模式：true 显示详细流式事件，false 只显示文本输出
-    const debugMode = process.argv.includes('--debug') || process.env.DEBUG_MODE === 'true';
-
+  
     console.log('📰 开始制作信息简报...');
     console.log('📋 待处理的URL列表:');
     inputUrls.forEach((url, index) => {
@@ -342,12 +340,7 @@ async function main() {
     });
     console.log('');
 
-    if (debugMode) {
-        console.log('🔍 调试模式已启用 - 将显示详细的流式事件信息');
-        console.log('');
-    }
-
-    await createNewsBriefing(inputUrls, debugMode);
+    await createNewsBriefing(inputUrls);
 }
 
 // 如果直接运行此文件，则执行主函数
