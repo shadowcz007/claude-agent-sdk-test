@@ -1,4 +1,5 @@
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -14,50 +15,57 @@ const dotenvResult = dotenv.config({ path: join(__dirname, '.env.local') });
 // 单独获取 ANTHROPIC_BASE_URL
 const envLocal = dotenvResult.parsed || {};
 
-// 定义 reader-tool 工具
-const readerTool = {
-    name: 'reader-tool',
-    description: '爬取网页内容并返回markdown格式的正文',
-    inputSchema: {
-        type: 'object',
-        properties: {
-            url: {
-                type: 'string',
-                description: '要爬取的网页URL'
-            }
-        },
-        required: ['url']
+// 修改jinaReader工具的实现
+const jinaReader = tool(
+    'jinaReader',
+    '爬取网页内容并返回markdown格式的正文', {
+        url: z.string().describe('要爬取的网页URL')
     },
-    execute: async(input) => {
+    async({ url }, extra) => {
         try {
-            const response = await fetch(`https://r.jina.ai/${input.url}`, {
+            const response = await fetch(`https://r.jina.ai/${url}`, {
                 headers: {
                     'X-Return-Format': 'markdown'
                 }
             });
 
             if (!response.ok) {
-                throw new Error(`Failed to fetch ${input.url}: ${response.statusText}`);
+                throw new Error(`Failed to fetch ${url}: ${response.statusText}`);
             }
 
             const content = await response.text();
+
+            // 返回符合MCP标准的CallToolResult格式
             return {
-                success: true,
-                content: content,
-                url: input.url
+                content: [{
+                    type: 'text',
+                    text: content
+                }],
+                isError: false
             };
         } catch (error) {
-            console.error(`Error fetching ${input.url}:`, error);
+            console.error(`Error fetching ${url}:`, error);
+
+            // 错误情况也返回标准格式
             return {
-                success: false,
-                error: error.message,
-                url: input.url
+                content: [{
+                    type: 'text',
+                    text: `无法获取网页内容: ${error.message}`
+                }],
+                isError: true
             };
         }
     }
-};
+);
 
-async function createNewsBriefing(urls) {
+// 创建 MCP 服务器
+const mcpServer = createSdkMcpServer({
+    name: 'news-briefing-server',
+    version: '1.0.0',
+    tools: [jinaReader]
+});
+
+async function createNewsBriefing(urls, debugMode = false) {
     const targetDir = process.env.TARGET_DIR || '/Users/shadow/Documents/GitHub/claude-agent-sdk-test/test';
     const env = {
         ...process.env,
@@ -71,6 +79,12 @@ async function createNewsBriefing(urls) {
         ...envLocal
     };
 
+    // 调试状态跟踪
+    let deltaCount = 0;
+    let lastDeltaLogTime = 0;
+    let currentBlockType = null;
+    let thinkingBuffer = '';
+
     // 构建系统提示词，基于news_prompt.md的要求
     const systemPrompt = `系统提示：专业信息简报制作助手
 
@@ -81,7 +95,7 @@ async function createNewsBriefing(urls) {
 阶段1：信息获取与分析
 
 步骤1：快速浏览与分类
-• 使用reader-tool工具访问每个URL，获取核心内容
+• 使用jinaReader工具访问每个URL，获取核心内容
 • 根据主题相关性将信息源分组（如：政策法规、市场动态、技术进展、专家观点等）
 • 识别各信息源的权威性和时效性
 
@@ -168,7 +182,7 @@ async function createNewsBriefing(urls) {
 
 ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
 
-请按照系统提示中的要求，使用reader-tool工具访问这些URL，分析内容，并制作一份结构清晰、重点突出的中文简报（800字以内）。`;
+请按照系统提示中的要求，使用jinaReader工具访问这些URL，分析内容，并制作一份结构清晰、重点突出的中文简报（800字以内）。`;
 
     const messageStream = query({
         prompt: userPrompt,
@@ -178,7 +192,23 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
             systemPrompt: systemPrompt,
             permissionMode: 'bypassPermissions',
             includePartialMessages: true,
-            tools: [readerTool], // 添加reader-tool工具
+            mcpServers: {
+                'news-briefing-server': mcpServer
+            }, // 添加包含jinaReader工具的MCP服务器
+            // allowedTools:设置失效 官方bug？,
+            disallowedTools:['WebFetch','WebSearch','Task',
+  'Bash',
+  'Glob',
+  'Grep',
+  'ExitPlanMode',
+  'Read',
+  'Edit',
+  'Write',
+  'NotebookEdit',
+  'TodoWrite',
+  'BashOutput',
+  'KillShell',
+  'SlashCommand'],
             hooks: {
                 SessionStart: [{
                     hooks: [async(input) => {
@@ -189,7 +219,7 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
                 PreToolUse: [{
                     hooks: [async(input) => {
                         console.log(`🛠️ 即将调用工具: ${input.tool_name}`);
-                        if (input.tool_name === 'reader-tool') {
+                        if (input.tool_name.match('_jinaReader')) {
                             console.log('📥 正在爬取URL:', input.tool_input.url);
                         } else {
                             console.log('📥 输入:', JSON.stringify(input.tool_input, null, 2));
@@ -200,7 +230,7 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
                 PostToolUse: [{
                     hooks: [async(input) => {
                         console.log(`✅ 工具 ${input.tool_name} 执行完成`);
-                        if (input.tool_name === 'reader-tool') {
+                        if (input.tool_name.match('_jinaReader') ) {
                             console.log(`📄 成功爬取: ${input.tool_input.url}`);
                         }
                         return { continue: true };
@@ -220,7 +250,11 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
         switch (msg.type) {
             case 'system':
                 if (msg.subtype === 'init') {
-                    console.log('✅ 会话已启动，模型:', msg.model);
+                    console.log('✅ 会话已启动,模型:', msg.model);
+                    console.log('✅ 会话已启动,cwd', msg.cwd);
+                    console.log('✅ 会话已启动,tools', msg.tools);
+                    console.log('✅ 会话已启动,mcp_servers', msg.mcp_servers);
+                  
                 } else if (msg.subtype === 'compact_boundary') {
                     console.log('🔄 对话历史已压缩');
                 }
@@ -232,9 +266,106 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
                 break;
 
             case 'stream_event':
-                // 流式中间内容（需开启 includePartialMessages）
-                if (msg.event.type === 'content_block_delta') {
-                    process.stdout.write(msg.event.delta.text || '');
+                // 增强的流式事件处理
+                const eventType = msg.event.type;
+                
+                switch (eventType) {
+                    case 'content_block_delta':
+                        // 正常的文本输出
+                        const text = msg.event.delta?.text || '';
+                        if (text) {
+                            // 所有内容都直接输出到控制台
+                            process.stdout.write(text);
+                            
+                            // 如果是 thinking 内容，同时缓冲起来用于调试信息
+                            if (currentBlockType === 'thinking') {
+                                thinkingBuffer += text;
+                            }
+                        }
+                        
+                        // 智能调试日志：减少冗余输出
+                        if (debugMode) {
+                            deltaCount++;
+                            const now = Date.now();
+                            // 每100个delta事件或每5秒记录一次
+                            if (deltaCount % 100 === 0 || now - lastDeltaLogTime > 5000) {
+                                const blockInfo = currentBlockType ? ` (当前块: ${currentBlockType})` : '';
+                                console.log(`🔍 流式事件类型: content_block_delta (已处理 ${deltaCount} 个事件)${blockInfo}`);
+                                lastDeltaLogTime = now;
+                            }
+                        }
+                        break;
+                        
+                    case 'content_block_start':
+                        // 内容块开始
+                        const blockType = msg.event.content_block?.type;
+                        currentBlockType = blockType;
+                        
+                        if (debugMode) {
+                            if (blockType === 'text') {
+                                console.log('📝 开始输出文本内容');
+                            } else if (blockType === 'tool_use') {
+                                console.log('🛠️ 开始工具调用');
+                            } else if (blockType === 'thinking') {
+                                console.log('🧠 开始输出思考过程');
+                                thinkingBuffer = ''; // 重置思考内容缓冲区
+                            } else {
+                                console.log('🔧 开始内容块:', blockType);
+                            }
+                        }
+                        break;
+                        
+                    case 'content_block_stop':
+                        // 内容块结束
+                        if (debugMode) {
+                            if (currentBlockType === 'thinking' && thinkingBuffer) {
+                                console.log('🧠 思考过程完成，内容长度:', thinkingBuffer.length, '字符');
+                                // 可以选择性地显示部分思考内容
+                                if (thinkingBuffer.length > 200) {
+                                    console.log('🧠 思考内容预览:', thinkingBuffer.substring(0, 200) + '...');
+                                } else {
+                                    console.log('🧠 思考内容:', thinkingBuffer);
+                                }
+                            }
+                            console.log('✅ 内容块输出完成');
+                        }
+                        currentBlockType = null;
+                        thinkingBuffer = '';
+                        break;
+                        
+                    case 'message_delta':
+                        // 消息增量更新
+                        if (debugMode) {
+                            if (msg.event.delta?.usage) {
+                                console.log('📊 Token 使用情况:', msg.event.delta.usage);
+                            }
+                            if (msg.event.delta?.stop_reason) {
+                                console.log('🛑 停止原因:', msg.event.delta.stop_reason);
+                            }
+                        }
+                        break;
+                        
+                    case 'message_stop':
+                        // 消息结束
+                        if (debugMode) {
+                            console.log('✅ 消息输出完成');
+                        }
+                        break;
+                        
+                    case 'message_start':
+                        // 消息开始
+                        if (debugMode) {
+                            console.log('🚀 开始新消息');
+                        }
+                        break;
+                        
+                    default:
+                        // 其他事件类型（可能包含 thinking 相关信息）
+                        if (debugMode) {
+                            console.log('🔍 其他事件类型:', eventType);
+                            console.log('📋 事件详情:', JSON.stringify(msg.event, null, 2));
+                        }
+                        break;
                 }
                 break;
 
@@ -264,14 +395,22 @@ async function main() {
     const args = process.argv.slice(2);
     const inputUrls = args.length > 0 ? args : urls;
 
+    // 设置调试模式：true 显示详细流式事件，false 只显示文本输出
+    const debugMode = process.argv.includes('--debug') || process.env.DEBUG_MODE === 'true';
+
     console.log('📰 开始制作信息简报...');
     console.log('📋 待处理的URL列表:');
     inputUrls.forEach((url, index) => {
         console.log(`  ${index + 1}. ${url}`);
     });
     console.log('');
+    
+    if (debugMode) {
+        console.log('🔍 调试模式已启用 - 将显示详细的流式事件信息');
+        console.log('');
+    }
 
-    await createNewsBriefing(inputUrls);
+    await createNewsBriefing(inputUrls, debugMode);
 }
 
 // 如果直接运行此文件，则执行主函数
@@ -279,4 +418,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     main().catch(console.error);
 }
 
-export { createNewsBriefing, readerTool };
+export { createNewsBriefing, jinaReader, mcpServer };
