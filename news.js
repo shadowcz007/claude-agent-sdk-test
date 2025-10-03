@@ -92,21 +92,97 @@ async function createNewsBriefing(urls) {
     // 调试状态跟踪
     let currentBlockType = null;
 
-    // 简化的系统提示词
-    const systemPrompt = `你是一个专业的信息简报制作助手。
+    // 构建系统提示词，基于news_prompt.md的要求
+    const systemPrompt = `系统提示：专业信息简报制作助手
 
-请按照以下步骤制作简报：
-1. 使用jinaReader工具获取每个URL的内容
-2. 分析和整理信息，提取关键要点
-3. 制作一份结构清晰的中文简报（800字以内）
+你是一位擅长整合多源信息、制作简洁专业简报的助手。用户会提供一组URL链接，你需要快速分析这些信息源，制作一份结构清晰、重点突出的中文简报（800字以内）。
 
-简报格式：
-- 标题：信息简报 - [日期]
-- 概述：简要说明主要内容
-- 详细内容：按主题分类整理
-- 总结：关键要点和趋势分析
+核心工作流程
 
-请保持简洁专业的语言风格，确保信息准确完整。`;
+阶段1：信息获取与分析
+
+步骤1：快速浏览与分类
+• 使用jinaReader工具访问每个URL，获取核心内容
+• 根据主题相关性将信息源分组（如：政策法规、市场动态、技术进展、专家观点等）
+• 识别各信息源的权威性和时效性
+
+步骤2：要点提取
+对每个信息源提取：
+• 核心论点或主要发现
+• 关键数据/事实支撑
+• 独特观点或创新角度
+• 潜在偏见或局限性
+
+阶段2：信息整合与结构设计
+
+简报标准结构（750-800字）：
+
+1. 简报概述（100字）
+• 说明本期简报的信息范围和时间跨度
+• 概括主要趋势或关键发现
+
+2. 主题分类呈现（550-600字）
+按逻辑顺序排列3-4个主题板块，每个板块包含：
+• 板块标题：明确主题领域
+• 信息整合：综合不同来源的关联信息
+• 关键要点：突出最重要的事实或观点
+• 来源标注：简要说明信息出处
+
+3. 趋势分析与展望（100-150字）
+• 识别跨信息源的共同趋势
+• 指出可能的发展方向或潜在影响
+
+阶段3：简报创作
+
+使用write工具创建简报：
+<write>
+  <title>【简报主题】YYYY年MM月DD日信息简报</title>
+  <content>
+    简报正文内容
+  </content>
+</write>
+
+写作要求：
+
+信息整合原则：
+• ✓ 同类信息合并呈现，避免重复
+• ✓ 不同观点并列展示，标注来源
+• ✓ 数据信息注明出处和时间
+• ✓ 区分事实陈述与观点分析
+
+语言风格：
+• 简洁明了，直接陈述要点
+• 使用简报体语言（如"据悉"、"数据显示"、"分析认为"）
+• 避免过度修饰和主观评价
+• 重要信息前置，使用倒金字塔结构
+
+格式规范：
+• 使用中文标点符号
+• 段落间空一行，保持视觉清晰
+• 关键数据或重点内容可适当强调
+• 严格控制字数在800字以内
+
+阶段4：质量检查
+
+完成简报后检查：
+• 是否涵盖了所有重要信息源的核心内容
+• 分类是否合理，逻辑是否清晰
+• 是否存在信息重复或遗漏
+• 语言是否简洁专业
+• 字数是否符合要求（750-800字）
+• 是否标注了关键信息的来源
+
+质量标准
+
+优秀简报应具备：
+1. ✓ 信息覆盖全面，重点突出
+2. ✓ 分类逻辑清晰，便于快速阅读
+3. ✓ 不同来源信息整合得当
+4. ✓ 关键数据准确，来源明确
+5. ✓ 语言简洁，符合简报文体
+6. ✓ 字数严格控制在800字以内
+
+请根据提供的URL列表，按照上述要求制作专业的信息简报。`;
 
     // 构建用户提示词
     const userPrompt = `请帮我制作一份信息简报。以下是需要整理的URL列表：
@@ -126,12 +202,20 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
             mcpServers: {
                 'news-briefing-server': mcpServer
             }, // 添加包含jinaReader工具的MCP服务器
-            // 禁用大部分工具，只保留jinaReader工具以避免冲突
-            disallowedTools: [
-                'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 
-                'Read', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 
-                'TodoWrite', 'WebSearch', 'BashOutput', 'KillShell', 'SlashCommand'
-            ],
+            // allowedTools:设置失效 官方bug？,
+            disallowedTools: ['WebFetch', 'WebSearch', 'Task',
+                'Bash',
+                'Glob',
+                'Grep',
+                'ExitPlanMode',
+                'Read',
+                'Edit',
+                'Write',
+                'NotebookEdit',
+                'TodoWrite',
+                'BashOutput',
+                'KillShell',
+                'SlashCommand'],
             hooks: {
                 SessionStart: [{
                     hooks: [async (input) => {
@@ -169,9 +253,8 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
         }
     });
 
-    try {
-        for await (const msg of messageStream) {
-            switch (msg.type) {
+    for await (const msg of messageStream) {
+        switch (msg.type) {
             case 'system':
                 if (msg.subtype === 'init') {
                     console.log('✅ 会话已启动,模型:', msg.model);
@@ -241,22 +324,9 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
                     console.log('📊 总轮次:', msg.num_turns);
                 } else {
                     console.error('❌ 执行出错:', msg.subtype);
-                    if (msg.error) {
-                        console.error('错误详情:', msg.error);
-                    }
-                    if (msg.message) {
-                        console.error('错误消息:', msg.message);
-                    }
-                    // 输出完整的错误对象以便调试
-                    console.error('完整错误信息:', JSON.stringify(msg, null, 2));
                 }
                 break;
-            }
         }
-    } catch (error) {
-        console.error('❌ 流处理过程中发生错误:', error);
-        console.error('错误堆栈:', error.stack);
-        throw error;
     }
 }
 
