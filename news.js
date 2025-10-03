@@ -299,38 +299,9 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
                         currentBlockType = null;
                         break;
 
-                    case 'message_delta':
-                        // 消息增量更新
-                        if (debugMode) {
-                            if (msg.event.delta?.usage) {
-                                console.log('📊 Token 使用情况:', msg.event.delta.usage);
-                            }
-                            if (msg.event.delta?.stop_reason) {
-                                console.log('🛑 停止原因:', msg.event.delta.stop_reason);
-                            }
-                        }
-                        break;
-
-                    case 'message_stop':
-                        // 消息结束
-                        if (debugMode) {
-                            console.log('✅ 消息输出完成');
-                        }
-                        break;
-
-                    case 'message_start':
-                        // 消息开始
-                        if (debugMode) {
-                            console.log('🚀 开始新消息');
-                        }
-                        break;
 
                     default:
-                        // 其他事件类型（可能包含 thinking 相关信息）
-                        if (true) {
-                            console.log('🔍 其他事件类型:', eventType);
-                            console.log('📋 事件详情:', JSON.stringify(msg.event, null, 2));
-                        }
+
                         break;
                 }
                 break;
