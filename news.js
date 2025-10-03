@@ -80,10 +80,7 @@ async function createNewsBriefing(urls, debugMode = false) {
     };
 
     // 调试状态跟踪
-    let deltaCount = 0;
-    let lastDeltaLogTime = 0;
     let currentBlockType = null;
-    let thinkingBuffer = '';
 
     // 构建系统提示词，基于news_prompt.md的要求
     const systemPrompt = `系统提示：专业信息简报制作助手
@@ -196,28 +193,28 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
                 'news-briefing-server': mcpServer
             }, // 添加包含jinaReader工具的MCP服务器
             // allowedTools:设置失效 官方bug？,
-            disallowedTools:['WebFetch','WebSearch','Task',
-  'Bash',
-  'Glob',
-  'Grep',
-  'ExitPlanMode',
-  'Read',
-  'Edit',
-  'Write',
-  'NotebookEdit',
-  'TodoWrite',
-  'BashOutput',
-  'KillShell',
-  'SlashCommand'],
+            disallowedTools: ['WebFetch', 'WebSearch', 'Task',
+                'Bash',
+                'Glob',
+                'Grep',
+                'ExitPlanMode',
+                'Read',
+                'Edit',
+                'Write',
+                'NotebookEdit',
+                'TodoWrite',
+                'BashOutput',
+                'KillShell',
+                'SlashCommand'],
             hooks: {
                 SessionStart: [{
-                    hooks: [async(input) => {
+                    hooks: [async (input) => {
                         console.log('🚀 简报制作会话开始，ID:', input.session_id);
                         return { continue: true };
                     }]
                 }],
                 PreToolUse: [{
-                    hooks: [async(input) => {
+                    hooks: [async (input) => {
                         console.log(`🛠️ 即将调用工具: ${input.tool_name}`);
                         if (input.tool_name.match('_jinaReader')) {
                             console.log('📥 正在爬取URL:', input.tool_input.url);
@@ -228,16 +225,16 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
                     }]
                 }],
                 PostToolUse: [{
-                    hooks: [async(input) => {
+                    hooks: [async (input) => {
                         console.log(`✅ 工具 ${input.tool_name} 执行完成`);
-                        if (input.tool_name.match('_jinaReader') ) {
+                        if (input.tool_name.match('_jinaReader')) {
                             console.log(`📄 成功爬取: ${input.tool_input.url}`);
                         }
                         return { continue: true };
                     }]
                 }],
                 SessionEnd: [{
-                    hooks: [async(input) => {
+                    hooks: [async (input) => {
                         console.log('🔚 简报制作会话结束');
                         return { continue: true };
                     }]
@@ -251,10 +248,10 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
             case 'system':
                 if (msg.subtype === 'init') {
                     console.log('✅ 会话已启动,模型:', msg.model);
-                    console.log('✅ 会话已启动,cwd', msg.cwd);
-                    console.log('✅ 会话已启动,tools', msg.tools);
-                    console.log('✅ 会话已启动,mcp_servers', msg.mcp_servers);
-                  
+                    console.log('✅  cwd', msg.cwd);
+                    console.log('✅  tools', msg.tools);
+                    console.log('✅  mcp_servers', msg.mcp_servers);
+
                 } else if (msg.subtype === 'compact_boundary') {
                     console.log('🔄 对话历史已压缩');
                 }
@@ -268,71 +265,40 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
             case 'stream_event':
                 // 增强的流式事件处理
                 const eventType = msg.event.type;
-                
+
                 switch (eventType) {
                     case 'content_block_delta':
                         // 正常的文本输出
                         const text = msg.event.delta?.text || '';
+                        const thinking = msg.event.delta?.thinking || '';
+
                         if (text) {
                             // 所有内容都直接输出到控制台
                             process.stdout.write(text);
-                            
-                            // 如果是 thinking 内容，同时缓冲起来用于调试信息
-                            if (currentBlockType === 'thinking') {
-                                thinkingBuffer += text;
-                            }
                         }
-                        
-                        // 智能调试日志：减少冗余输出
-                        if (debugMode) {
-                            deltaCount++;
-                            const now = Date.now();
-                            // 每100个delta事件或每5秒记录一次
-                            if (deltaCount % 100 === 0 || now - lastDeltaLogTime > 5000) {
-                                const blockInfo = currentBlockType ? ` (当前块: ${currentBlockType})` : '';
-                                console.log(`🔍 流式事件类型: content_block_delta (已处理 ${deltaCount} 个事件)${blockInfo}`);
-                                lastDeltaLogTime = now;
-                            }
+                        if (thinking) {
+                            // 所有内容都直接输出到控制台
+                            process.stdout.write(thinking);
                         }
                         break;
-                        
+
                     case 'content_block_start':
                         // 内容块开始
                         const blockType = msg.event.content_block?.type;
                         currentBlockType = blockType;
-                        
-                        if (debugMode) {
-                            if (blockType === 'text') {
-                                console.log('📝 开始输出文本内容');
-                            } else if (blockType === 'tool_use') {
-                                console.log('🛠️ 开始工具调用');
-                            } else if (blockType === 'thinking') {
-                                console.log('🧠 开始输出思考过程');
-                                thinkingBuffer = ''; // 重置思考内容缓冲区
-                            } else {
-                                console.log('🔧 开始内容块:', blockType);
-                            }
+
+                        if (blockType == 'thinking') {
+                            console.log('🧠 开始输出思考过程');
                         }
+
+
                         break;
-                        
+
                     case 'content_block_stop':
-                        // 内容块结束
-                        if (debugMode) {
-                            if (currentBlockType === 'thinking' && thinkingBuffer) {
-                                console.log('🧠 思考过程完成，内容长度:', thinkingBuffer.length, '字符');
-                                // 可以选择性地显示部分思考内容
-                                if (thinkingBuffer.length > 200) {
-                                    console.log('🧠 思考内容预览:', thinkingBuffer.substring(0, 200) + '...');
-                                } else {
-                                    console.log('🧠 思考内容:', thinkingBuffer);
-                                }
-                            }
-                            console.log('✅ 内容块输出完成');
-                        }
+
                         currentBlockType = null;
-                        thinkingBuffer = '';
                         break;
-                        
+
                     case 'message_delta':
                         // 消息增量更新
                         if (debugMode) {
@@ -344,24 +310,24 @@ ${urls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
                             }
                         }
                         break;
-                        
+
                     case 'message_stop':
                         // 消息结束
                         if (debugMode) {
                             console.log('✅ 消息输出完成');
                         }
                         break;
-                        
+
                     case 'message_start':
                         // 消息开始
                         if (debugMode) {
                             console.log('🚀 开始新消息');
                         }
                         break;
-                        
+
                     default:
                         // 其他事件类型（可能包含 thinking 相关信息）
-                        if (debugMode) {
+                        if (true) {
                             console.log('🔍 其他事件类型:', eventType);
                             console.log('📋 事件详情:', JSON.stringify(msg.event, null, 2));
                         }
@@ -388,7 +354,7 @@ async function main() {
     // 示例URL列表，您可以根据需要修改
     const urls = [
         'https://codenow.wiki',
-        'https://www.producthunt.com/products/instruct-2' 
+        'https://www.producthunt.com/products/instruct-2'
     ];
 
     // 从命令行参数获取URL列表，如果没有则使用默认示例
@@ -404,7 +370,7 @@ async function main() {
         console.log(`  ${index + 1}. ${url}`);
     });
     console.log('');
-    
+
     if (debugMode) {
         console.log('🔍 调试模式已启用 - 将显示详细的流式事件信息');
         console.log('');
