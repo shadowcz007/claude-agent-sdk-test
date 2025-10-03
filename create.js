@@ -2,6 +2,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
 
 // 获取当前文件的目录
 const __filename = fileURLToPath(
@@ -15,17 +16,26 @@ const dotenvResult = dotenv.config({ path: join(__dirname, '.env.local') });
 const envLocal = dotenvResult.parsed || {};
 
 async function runWithCustomSystemPromptAndCwd() {
-    const targetDir = process.env.TARGET_DIR || '/Users/shadow/Documents/GitHub/claude-agent-sdk-test/test';
+    // 使用 Windows 兼容的路径，如果没有设置则使用当前目录下的 test 文件夹
+    const targetDir = process.env.TARGET_DIR || join(__dirname, 'test');
+    
+    // 确保目标目录存在
+    if (!existsSync(targetDir)) {
+        mkdirSync(targetDir, { recursive: true });
+    }
+    
     const env = {
         ...process.env,
-        ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
-        ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
-        ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL,
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
-        ANTHROPIC_DEFAULT_OPUS_MODEL: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL,
-        ANTHROPIC_DEFAULT_SONNET_MODEL: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL,
-        CLAUDE_CODE_SUBAGENT_MODEL: process.env.CLAUDE_CODE_SUBAGENT_MODEL,
-        ...envLocal
+        // 确保 Node.js 路径在 PATH 中
+        PATH: process.env.PATH,
+        // Anthropic 配置
+        ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN || envLocal.ANTHROPIC_AUTH_TOKEN,
+        ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || envLocal.ANTHROPIC_BASE_URL,
+        ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL || envLocal.ANTHROPIC_MODEL,
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || envLocal.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+        ANTHROPIC_DEFAULT_OPUS_MODEL: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL || envLocal.ANTHROPIC_DEFAULT_OPUS_MODEL,
+        ANTHROPIC_DEFAULT_SONNET_MODEL: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL || envLocal.ANTHROPIC_DEFAULT_SONNET_MODEL,
+        CLAUDE_CODE_SUBAGENT_MODEL: process.env.CLAUDE_CODE_SUBAGENT_MODEL || envLocal.CLAUDE_CODE_SUBAGENT_MODEL,
     };
 
     const messageStream = query({
@@ -33,7 +43,9 @@ async function runWithCustomSystemPromptAndCwd() {
         options: {
             env,
             cwd: targetDir,
-            systemPrompt: "你是一个专业的产品设计师，擅长调研用户需求，设计独特的产品功能，富有乔布斯演讲的叙事能力。根据用户的指令创建ppt，不需要询问用户，直接创建",
+            systemPrompt: `你是一个专业的产品设计师，擅长调研用户需求，设计独特的产品功能，富有乔布斯演讲的叙事能力。根据用户的指令创建ppt，不需要询问用户，直接创建。
+
+重要：请使用 Write 工具将文件保存到当前工作目录（${targetDir}）中，文件名使用相对路径格式，例如：./filename.md`,
             permissionMode: 'bypassPermissions', // 简化权限控制
             includePartialMessages: true, // 可选：包含流式中间消息
             hooks: {
